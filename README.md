@@ -58,7 +58,7 @@ flowchart TD
 | **Yandex Mail account** | For SMTP delivery (app password, not regular password) |
 | **Disk** | ~10 GB free (Ollama model storage + Docker images) |
 
-> **Note:** mistral:7b runs on CPU, but first inference after container start takes 2–4 minutes. A VM with 4+ cores is recommended for tolerable daily digest latency (typically 5–10 min end-to-end).
+> **Note:** mistral:7b runs on CPU, but first inference after container start takes 2–4 minutes. 8 cores keep the daily digest latency tolerable (typically 5–10 min end-to-end); it will still run on 4 cores, just noticeably slower.
 
 ---
 
@@ -195,7 +195,7 @@ The bot fetches from 18 RSS feeds across two tracks:
 
 ## Deploy to Yandex Cloud VM
 
-The `infra/` directory contains helpers for Yandex Cloud.
+The `infra/` directory contains helpers for Yandex Cloud. Requires the `yc` CLI (tested on 1.30.0) and `jq` on your local machine.
 
 ### 1. Add your SSH public key to cloud-init
 
@@ -207,6 +207,8 @@ cat ~/.ssh/id_rsa.pub   # or id_ed25519.pub
 
 > The key **must** live inside `cloud-init.yaml` — do not pass `yc compute instance create --ssh-key`. That flag generates its own cloud-config and writes it to the same `user-data` metadata key, so yc rejects the combination outright:
 > `ERROR: --ssh-key flag conflicts with user-data metadata key.`
+
+> ⚠️ **Never use `$VARIABLE` inside `cloud-init.yaml`.** `yc` expands environment variables from your **local** shell into the contents of `--metadata-from-file` before uploading it. A variable that is unset locally — such as `$VERSION_CODENAME` — is silently replaced with an empty string, and the VM receives a broken file. Command substitution `$(...)` is passed through untouched and evaluated on the VM, so use `$(lsb_release -cs)` instead. This is why the Docker apt source line in `cloud-init.yaml` uses `$(lsb_release -cs)`.
 
 ### 2. Find your subnet name
 
@@ -226,21 +228,36 @@ yc compute instance create \
   --metadata-from-file user-data=infra/cloud-init.yaml
 ```
 
-Cloud-init installs Docker Engine + the Compose plugin, `make`, and prepares `/opt/k8s-news-bot`. Wait for it to finish (~2–3 min) before deploying.
+Cloud-init installs Docker Engine + the Compose plugin, `make`, and prepares `/opt/k8s-news-bot`. Creation takes ~45 s; cloud-init then needs a further ~2–3 min to finish installing Docker.
 
 Notes on the flags:
 - `--metadata-from-file user-data=...` is how cloud-init is passed. There is no `--cloud-config` flag in `yc`.
-- `--network-interface` is required to reach the VM. `nat-ip-version=ipv4` gives it a public IP; drop it if you only ever connect via `yc compute ssh --tunnel` (which is what `deploy.sh` uses).
+- `--network-interface` with `nat-ip-version=ipv4` is required. The public IP is not optional: `yc compute ssh` needs an OS Login profile (which the cloud-init user `yc-user` does not have), and `yc compute scp` does not exist at all — so the VM is reached by plain `ssh`/`scp` over its public IP.
 - `--memory 8G` — the flag also accepts a bare `8` (interpreted as GB), but the suffix is unambiguous.
 - Substitute the `subnet-name` value with the one from step 2.
 
-### 4. Deploy project files and start containers
+### 4. Verify cloud-init actually succeeded
+
+```bash
+VM_IP=$(yc compute instance get --name k8s-news-bot --format json \
+  | jq -r '.network_interfaces[0].primary_v4_address.one_to_one_nat.address')
+
+ssh yc-user@"$VM_IP" 'docker compose version && docker version --format "{{.Server.Version}}"'
+```
+
+> **Do not trust `cloud-init status` alone.** `runcmd` is executed as a plain `#!/bin/sh` script without `set -e`: if the Docker installation fails, the remaining commands still run, the script exits 0, and cloud-init reports `status: done` with `errors: []` — while `final_message` cheerfully prints "Docker installed." The `docker compose version` check above is the only reliable signal, which is why `cloud-init.yaml` also runs it as its last `runcmd` step.
+
+### 5. Deploy project files and start containers
 
 ```bash
 ./infra/deploy.sh
 ```
 
-The script copies `news-bot/`, `docker-compose.yml`, `Makefile` and `.env` to the VM over `yc compute scp --tunnel`, then builds and starts the stack.
+The script resolves the VM's public IP via `yc`, copies `news-bot/`, `docker-compose.yml`, `Makefile` and `.env` over `scp`, then builds and starts the stack over `ssh`. Override the defaults with environment variables if needed:
+
+```bash
+VM_NAME=my-vm SSH_KEY=~/.ssh/id_ed25519 ./infra/deploy.sh
+```
 
 ---
 

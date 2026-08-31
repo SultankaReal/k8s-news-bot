@@ -23,12 +23,20 @@ runcmd:
   - install -m 0755 -d /etc/apt/keyrings
   - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
   - chmod a+r /etc/apt/keyrings/docker.asc
-  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+  # NOTE: do not use $VERSION_CODENAME or any other $VAR here. `yc` substitutes
+  # environment variables from your LOCAL shell into --metadata-from-file content
+  # before upload, so an unset $VERSION_CODENAME silently becomes an empty string
+  # and produces a malformed docker.list. Command substitution $(...) is passed
+  # through untouched, so `$(lsb_release -cs)` is evaluated on the VM as intended.
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
   - apt-get update -qq
   - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   - systemctl enable docker
   - systemctl start docker
   - mkdir -p /opt/k8s-news-bot
   - chown yc-user:yc-user /opt/k8s-news-bot
+  # Fail loudly: without this, a broken Docker install still leaves
+  # `cloud-init status` reporting "done" with no errors.
+  - docker compose version
 
 final_message: "k8s-news-bot VM ready. Docker installed."
