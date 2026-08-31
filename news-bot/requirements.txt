@@ -1,0 +1,5 @@
+anthropic>=0.40.0
+apscheduler>=3.10.4
+feedparser>=6.0.11
+requests>=2.32.0
+gpt-researcher>=0.14.0

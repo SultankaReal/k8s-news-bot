@@ -1,0 +1,103 @@
+services:
+
+  # ── Ollama — local LLM + embeddings (no external API needed) ─────────────
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── GPT Researcher MCP — deep weekly research engine ────────────────────
+  gptr:
+    image: ghcr.io/assafelovic/gpt-researcher:latest
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      RETRIEVER: ${RETRIEVER:-duckduckgo}
+      # LLM via Ollama
+      FAST_LLM: ${FAST_LLM:-ollama:mistral:7b}
+      SMART_LLM: ${SMART_LLM:-ollama:mistral:7b}
+      STRATEGIC_LLM: ${STRATEGIC_LLM:-ollama:mistral:7b}
+      OLLAMA_BASE_URL: http://ollama:11434
+      # Embeddings via Ollama (custom = OpenAI-compatible endpoint)
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-custom}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      OPENAI_API_KEY: ollama
+      OPENAI_BASE_URL: http://ollama:11434/v1
+      # Research settings
+      MAX_ITERATIONS: ${GPTR_MAX_ITERATIONS:-2}
+      MAX_SEARCH_RESULTS_PER_QUERY: ${GPTR_MAX_SEARCH_RESULTS:-6}
+      REPORT_FORMAT: markdown
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    volumes:
+      # Correct WORKDIR path so files land in the named volume (not container layer)
+      - gptr_outputs:/usr/src/app/outputs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── News Bot — scheduler + fetchers + delivery ───────────────────────────
+  news-bot:
+    build:
+      context: ./news-bot
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      gptr:
+        condition: service_healthy
+    environment:
+      # Delivery — Yandex Email (SMTP)
+      EMAIL_FROM: ${EMAIL_FROM}
+      EMAIL_PASSWORD: ${EMAIL_PASSWORD}
+      EMAIL_TO: ${EMAIL_TO:-${EMAIL_FROM}}
+      # gptr endpoint (research engine)
+      GPTR_URL: http://gptr:8000
+      GPTR_TIMEOUT: ${GPTR_TIMEOUT:-900}
+      # Schedule (UTC cron)
+      DAILY_DIGEST_CRON: ${DAILY_DIGEST_CRON:-0 6 * * *}
+      WEEKLY_REPORT_CRON: ${WEEKLY_REPORT_CRON:-0 7 * * 1}
+      # Cleanup: delete gptr outputs older than this many days
+      GPTR_OUTPUTS_MAX_AGE_DAYS: ${GPTR_OUTPUTS_MAX_AGE_DAYS:-7}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Debug: set to 1 to fire immediately on container start
+      RUN_DAILY_NOW: ${RUN_DAILY_NOW:-0}
+      RUN_WEEKLY_NOW: ${RUN_WEEKLY_NOW:-0}
+    volumes:
+      - bot_data:/data
+      # Shared with gptr so news-bot can clean up old output files
+      - gptr_outputs:/gptr-outputs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  gptr_outputs:
+  bot_data:
+  ollama_data:
