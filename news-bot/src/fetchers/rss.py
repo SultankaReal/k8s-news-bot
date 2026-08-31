@@ -39,18 +39,18 @@ FEEDS: list[dict] = [
     # ── Managed Kubernetes providers ──────────────────────────────────────────
     # AWS EKS — GitHub release feeds (AWS blog times out from Russian IPs)
     {"url": "https://github.com/aws/eks-distro/releases.atom",
-     "source": "github.com/aws/eks",
+     "source": "AWS EKS Distro",
      "tags": ["aws", "eks", "release"]},
     {"url": "https://github.com/awslabs/amazon-eks-ami/releases.atom",
-     "source": "github.com/aws/eks-ami",
+     "source": "AWS EKS AMI",
      "tags": ["aws", "eks", "release"]},
     # Google GKE — official release notes feed
     {"url": "https://cloud.google.com/feeds/kubernetes-engine-release-notes.xml",
-     "source": "cloud.google.com/gke",
+     "source": "GKE Release Notes",
      "tags": ["gke", "kubernetes", "release"]},
     # Azure AKS — GitHub releases (TechCommunity blog returns HTML from Russia)
     {"url": "https://github.com/Azure/AKS/releases.atom",
-     "source": "github.com/Azure/AKS",
+     "source": "Azure AKS",
      "tags": ["aks", "azure", "kubernetes", "release"]},
     # Alibaba Cloud ACK — no reliable RSS from Russian IPs;
     # covered via GPT Researcher weekly query instead.
@@ -112,8 +112,13 @@ def fetch_all() -> list[Article]:
 def _strip_html(text: str) -> str:
     import re
     from html import unescape
+    # Add newlines before block elements so list items don't run together
+    text = re.sub(r"<(?:li|p|br|h[1-6]|div|tr|dt|dd)[^>]*>", "\n", text, flags=re.I)
     text = re.sub(r"<[^>]+>", "", text)
-    return unescape(text).strip()
+    text = unescape(text)
+    # Collapse 3+ consecutive newlines to 2
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def _extract_title(entry, source: str) -> str:
@@ -171,8 +176,15 @@ def _fetch_feed(cfg: dict) -> list[Article]:
         if not url:
             continue
         title = _extract_title(entry, cfg["source"])
-        summary = entry.get("summary", entry.get("description", "")).strip()
-        summary = _strip_html(summary)[:500]
+        # Prefer entry.content (Atom full body) over summary — GitHub releases
+        # and GKE feed store rich release notes in <content>, not <summary>
+        content_raw = ""
+        if hasattr(entry, "content") and entry.content:
+            content_raw = entry.content[0].value if hasattr(entry.content[0], "value") \
+                else entry.content[0].get("value", "")
+        if not content_raw:
+            content_raw = entry.get("summary", entry.get("description", ""))
+        summary = _strip_html(content_raw)[:600]
 
         result.append(
             Article(

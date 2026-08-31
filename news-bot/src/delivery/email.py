@@ -33,9 +33,16 @@ def _markdown_to_html(text: str) -> str:
         else:
             # Bold **text**
             line = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", line)
-            # Link 🔗 url
+            # Markdown links [text](url) → must run before bare-URL pass
             line = re.sub(
-                r"(https?://[^\s<>\"]+)",
+                r'\[([^\]]+)\]\((https?://[^)]+)\)',
+                r'<a href="\2">\1</a>',
+                line,
+            )
+            # Bare URLs — exclude parens so trailing ) or . are not swallowed;
+            # skip URLs already inside href="..."
+            line = re.sub(
+                r'(?<!href=")(https?://[^\s<>"()]+)',
                 r'<a href="\1">\1</a>',
                 line,
             )

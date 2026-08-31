@@ -3,7 +3,7 @@
 Automated Kubernetes & DevOps digest bot. Runs a daily email digest and a weekly deep-research report — entirely self-hosted, no cloud AI APIs required.
 
 **What it does:**
-- **Daily digest** — fetches RSS from Habr (6 hubs), Kubernetes.io, CNCF, InfoQ, Prometheus, Grafana + GitHub release feeds for managed K8s providers (EKS, GKE, AKS) + runs an LLM-powered English research query via GPT Researcher. Delivers a combined digest to your inbox every morning.
+- **Daily digest** — fetches RSS from Habr (6 hubs), Kubernetes.io, CNCF, InfoQ, Prometheus, Grafana + GitHub release feeds for managed K8s providers (EKS, GKE, AKS). All links come from real RSS feeds — no LLM synthesis, no hallucination. Delivers to your inbox every morning in under 30 seconds.
 - **Weekly report** — runs 5 focused research queries (Kubernetes releases, CNCF, managed K8s, observability, Russian-language sources) and sends a comprehensive analytical report every Monday.
 
 All LLM inference and embeddings run locally via **Ollama** (`mistral:7b`). No OpenAI key needed.
@@ -174,9 +174,9 @@ INFO src.delivery.email — Email sent to you@yandex.ru: ☸️ K8s & DevOps д�
 INFO src.scheduler      — Daily digest delivered
 ```
 
-Expect ~8 minutes end-to-end: ~15 s for RSS, ~7 min for the research query on CPU, then the SMTP send.
+**Daily digest completes in under 30 seconds** — RSS-only, no LLM inference needed.
 
-> **Do not run `make test-daily` while a scheduled digest is in flight.** Ollama and gptr serve requests one at a time, so the second research query waits for the first and then hits its own timeout — you still get an email, but with the RSS section only and no research.
+> **Do not run `make test-daily` while a scheduled digest is in flight** — it will send a duplicate email.
 
 ---
 

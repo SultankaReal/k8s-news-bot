@@ -1,6 +1,6 @@
 """
 APScheduler jobs:
- - daily_digest:  runs every day, uses gptr quick search + RSS RU sources + delivers via email
+ - daily_digest:  runs every day, RSS only (managed K8s + RU sources) — no LLM, no hallucination
  - weekly_report: runs every Monday, runs gptr deep research + delivers
 """
 import logging
@@ -14,13 +14,37 @@ log = logging.getLogger(__name__)
 # Russian sources to pull from RSS regardless of gptr
 # Note: yandex.cloud blog RSS is broken (404); Habr covers YC content via cloud_computing hub
 _RU_SOURCES = {"habr.com"}
+
+# Habr topic filter — skip articles whose lead (before ":") contains these
+# off-topic words but NO on-topic words (e.g. OTUS weekly DB digests)
+_OFF_TOPIC_LEAD = frozenset([
+    "postgresql", "clickhouse", "mysql", "mongodb", "redis", "rabbitmq",
+    "playwright", "javascript", "typescript", "react", "angular",
+    "swift", "kotlin", "ruby", " php",
+])
+_ON_TOPIC_LEAD = frozenset([
+    "kubernetes", "k8s", "docker", "container", "контейнер",
+    "helm", "devops", "ci/cd", "cicd", "облако", "cloud", "linux",
+    "кластер", "cluster", "pod", "argo", "gitops", "terraform", "ansible",
+    "kubectl", "мониторинг", "monitoring", "observability",
+    "prometheus", "grafana", "инфраструктур", "infrastructure",
+    "eks", "gke", "aks", "nginx", "сети", "network",
+])
+
+
+def _is_on_topic_ru(title: str) -> bool:
+    """Return False only if the title lead has off-topic keywords and no on-topic ones."""
+    lead = title.split(":")[0].lower()
+    if any(w in lead for w in _OFF_TOPIC_LEAD):
+        return any(w in lead for w in _ON_TOPIC_LEAD)
+    return True
 # Managed K8s providers — show in a dedicated daily section
 # Using GitHub release feeds: AWS/GKE blogs block Russian IPs, GitHub does not
 _MANAGED_K8S_SOURCES = {
-    "github.com/aws/eks",      # EKS Distro releases
-    "github.com/aws/eks-ami",  # EKS AMI releases
-    "cloud.google.com/gke",    # GKE release notes
-    "github.com/Azure/AKS",    # AKS releases
+    "AWS EKS Distro",   # EKS Distro releases (GitHub)
+    "AWS EKS AMI",      # EKS AMI releases (GitHub)
+    "GKE Release Notes",# GKE release notes (official feed)
+    "Azure AKS",        # AKS releases (GitHub)
     # Alibaba ACK: no reliable RSS — covered via gptr weekly query
 }
 # Path where gptr writes output files (shared volume)
@@ -46,6 +70,7 @@ def _ru_rss_section() -> str:
         a for a in articles
         if a.source in _RU_SOURCES
         and (a.published is None or a.published >= cutoff)
+        and _is_on_topic_ru(a.title)
     ]
 
     if not ru:
@@ -61,7 +86,13 @@ def _ru_rss_section() -> str:
     lines = ["## 🇷🇺 Свежее из российских источников\n"]
     for art in ru[:15]:
         pub = f" ({art.published.strftime('%d.%m')})" if art.published else ""
-        lines.append(f"**{art.title}**{pub} — {art.source}\n{art.url}\n")
+        lines.append(f"**{art.title}**{pub} — {art.source}")
+        if art.summary:
+            snippet = art.summary[:200].rstrip()
+            if len(art.summary) > 200:
+                snippet += "…"
+            lines.append(snippet)
+        lines.append(art.url + "\n")
 
     return "\n".join(lines)
 
@@ -96,7 +127,13 @@ def _managed_k8s_section() -> str:
     lines = ["## ☁️ Managed Kubernetes (EKS · GKE · AKS · ACK)\n"]
     for art in mk8s[:12]:
         pub = f" ({art.published.strftime('%d.%m')})" if art.published else ""
-        lines.append(f"**{art.title}**{pub} — {art.source}\n{art.url}\n")
+        lines.append(f"**{art.title}**{pub} — {art.source}")
+        if art.summary:
+            snippet = art.summary[:450].rstrip()
+            if len(art.summary) > 450:
+                snippet += "…"
+            lines.append(snippet)
+        lines.append(art.url + "\n")
 
     return "\n".join(lines)
 
@@ -104,24 +141,15 @@ def _managed_k8s_section() -> str:
 def daily_digest() -> None:
     log.info("=== daily_digest started ===")
 
-    # RSS sections: fast, no DDG dependency — fetch first
-    # Both ru and managed-k8s call fetch_all() internally; they share the same
-    # network round-trip only if we cache — for simplicity, two separate calls
-    # are fine (feedparser is fast and feeds are cached by HTTP).
     ru_section = _ru_rss_section()
     mk8s_section = _managed_k8s_section()
 
-    # English research via gptr (takes 4-6 min)
-    report = gptr.daily_research()
-
-    if not report and not ru_section and not mk8s_section:
-        log.warning("daily_digest: gptr and all RSS sections returned empty — skipping")
+    if not ru_section and not mk8s_section:
+        log.warning("daily_digest: all RSS sections empty — skipping")
         return
 
     date_str = datetime.utcnow().strftime("%d.%m.%Y")
     parts = [f"☸️ **K8s & DevOps дайджест — {date_str}**\n"]
-    if report:
-        parts.append(report)
     if mk8s_section:
         parts.append(mk8s_section)
     if ru_section:
