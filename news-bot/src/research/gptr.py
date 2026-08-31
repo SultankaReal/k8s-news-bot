@@ -13,17 +13,21 @@ from ..config import get_config
 log = logging.getLogger(__name__)
 
 WEEKLY_QUERIES = [
-    "Kubernetes latest news releases announcements this week",
-    "CNCF cloud native DevOps best practices this week",
-    "AWS EKS Google GKE Azure AKS Alibaba ACK managed Kubernetes updates releases this week",
-    "Prometheus Grafana OpenTelemetry monitoring observability news this week",
+    "Kubernetes upstream releases patch notes announcements August 2026 kubernetes.io github.com/kubernetes",
+    "CNCF projects news August 2026: Helm Argo Cilium Flux Crossplane Kyverno Falco",
+    "AWS EKS Google GKE Azure AKS managed Kubernetes releases updates August 2026",
+    "Prometheus Grafana OpenTelemetry observability releases news August 2026",
     # Russian-language research (Habr, Yandex Cloud, VK Cloud, etc.)
-    "Kubernetes DevOps Хабр новости контейнеры облако Яндекс эта неделя",
+    "Kubernetes DevOps Хабр новости контейнеры облако Яндекс август 2026",
 ]
 
 DAILY_QUERY = (
-    "Kubernetes DevOps cloud-native news today: latest releases, blog posts, "
-    "security advisories, and notable community discussions"
+    "Kubernetes upstream news August 2026: "
+    "new releases patch notes official blog posts from kubernetes.io and github.com/kubernetes. "
+    "Current supported Kubernetes versions only (1.30 and newer, released after 2024). "
+    "Include: Kubernetes, CNCF, Helm, Argo, Cilium, container security from kubernetes.io. "
+    "Exclude: OpenShift, Rancher, databases (PostgreSQL ClickHouse MySQL MongoDB Redis), "
+    "old unsupported Kubernetes versions (1.23 1.24 1.25 1.26 1.27 1.28 1.29 and older)."
 )
 
 
