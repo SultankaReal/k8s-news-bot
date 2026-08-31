@@ -12,11 +12,23 @@ from .delivery import email as mailer
 log = logging.getLogger(__name__)
 
 # Russian sources to pull from RSS regardless of gptr
-_RU_SOURCES = {"habr.com", "yandex.cloud"}
+# Note: yandex.cloud blog RSS is broken (404); Habr covers YC content via cloud_computing hub
+_RU_SOURCES = {"habr.com"}
+# Managed K8s providers — show in a dedicated daily section
+# Using GitHub release feeds: AWS/GKE blogs block Russian IPs, GitHub does not
+_MANAGED_K8S_SOURCES = {
+    "github.com/aws/eks",      # EKS Distro releases
+    "github.com/aws/eks-ami",  # EKS AMI releases
+    "cloud.google.com/gke",    # GKE release notes
+    "github.com/Azure/AKS",    # AKS releases
+    # Alibaba ACK: no reliable RSS — covered via gptr weekly query
+}
 # Path where gptr writes output files (shared volume)
 _GPTR_OUTPUTS_PATH = "/gptr-outputs"
 # Articles no older than 96h for daily digest (Habr publishes less frequently)
 _RU_MAX_AGE_H = 96
+# Managed K8s blogs post less often — look back 120h (covers Thu-Mon gap on weekends)
+_MANAGED_K8S_MAX_AGE_H = 120
 
 
 def _ru_rss_section() -> str:
@@ -54,23 +66,64 @@ def _ru_rss_section() -> str:
     return "\n".join(lines)
 
 
+def _managed_k8s_section() -> str:
+    """Fetch recent articles from managed K8s providers (EKS, GKE, AKS, ACK)."""
+    from .fetchers.rss import fetch_all
+
+    try:
+        articles = fetch_all()
+    except Exception as exc:
+        log.warning("RSS fetch failed: %s", exc)
+        return ""
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=_MANAGED_K8S_MAX_AGE_H)
+    mk8s = [
+        a for a in articles
+        if a.source in _MANAGED_K8S_SOURCES
+        and (a.published is None or a.published >= cutoff)
+    ]
+
+    if not mk8s:
+        log.info("No recent managed K8s RSS articles (last %dh)", _MANAGED_K8S_MAX_AGE_H)
+        return ""
+
+    mk8s.sort(
+        key=lambda a: a.published or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+    log.info("Managed K8s RSS: %d articles", len(mk8s))
+    lines = ["## ☁️ Managed Kubernetes (EKS · GKE · AKS · ACK)\n"]
+    for art in mk8s[:12]:
+        pub = f" ({art.published.strftime('%d.%m')})" if art.published else ""
+        lines.append(f"**{art.title}**{pub} — {art.source}\n{art.url}\n")
+
+    return "\n".join(lines)
+
+
 def daily_digest() -> None:
     log.info("=== daily_digest started ===")
 
-    # Russian RSS: fast, no DDG dependency — fetch first
+    # RSS sections: fast, no DDG dependency — fetch first
+    # Both ru and managed-k8s call fetch_all() internally; they share the same
+    # network round-trip only if we cache — for simplicity, two separate calls
+    # are fine (feedparser is fast and feeds are cached by HTTP).
     ru_section = _ru_rss_section()
+    mk8s_section = _managed_k8s_section()
 
     # English research via gptr (takes 4-6 min)
     report = gptr.daily_research()
 
-    if not report and not ru_section:
-        log.warning("daily_digest: both gptr and RSS returned empty — skipping")
+    if not report and not ru_section and not mk8s_section:
+        log.warning("daily_digest: gptr and all RSS sections returned empty — skipping")
         return
 
     date_str = datetime.utcnow().strftime("%d.%m.%Y")
     parts = [f"☸️ **K8s & DevOps дайджест — {date_str}**\n"]
     if report:
         parts.append(report)
+    if mk8s_section:
+        parts.append(mk8s_section)
     if ru_section:
         parts.append(ru_section)
 

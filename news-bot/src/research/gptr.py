@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 WEEKLY_QUERIES = [
     "Kubernetes latest news releases announcements this week",
     "CNCF cloud native DevOps best practices this week",
-    "Managed Kubernetes EKS GKE AKS Yandex Cloud updates this week",
+    "AWS EKS Google GKE Azure AKS Alibaba ACK managed Kubernetes updates releases this week",
     "Prometheus Grafana OpenTelemetry monitoring observability news this week",
     # Russian-language research (Habr, Yandex Cloud, VK Cloud, etc.)
     "Kubernetes DevOps Хабр новости контейнеры облако Яндекс эта неделя",

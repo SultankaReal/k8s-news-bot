@@ -3,7 +3,7 @@
 Automated Kubernetes & DevOps digest bot. Runs a daily email digest and a weekly deep-research report — entirely self-hosted, no cloud AI APIs required.
 
 **What it does:**
-- **Daily digest** — fetches RSS from Habr, Yandex Cloud, Kubernetes.io, CNCF, InfoQ, AWS/GKE blogs, Prometheus, Grafana + runs an LLM-powered English research query via GPT Researcher. Delivers a combined digest to your inbox every morning.
+- **Daily digest** — fetches RSS from Habr (6 hubs), Kubernetes.io, CNCF, InfoQ, Prometheus, Grafana + GitHub release feeds for managed K8s providers (EKS, GKE, AKS) + runs an LLM-powered English research query via GPT Researcher. Delivers a combined digest to your inbox every morning.
 - **Weekly report** — runs 5 focused research queries (Kubernetes releases, CNCF, managed K8s, observability, Russian-language sources) and sends a comprehensive analytical report every Monday.
 
 All LLM inference and embeddings run locally via **Ollama** (`mistral:7b`). No OpenAI key needed.
@@ -29,7 +29,7 @@ flowchart TD
 
         subgraph Bot["news-bot — Scheduler"]
             B1["APScheduler\nCron jobs"]
-            B2["RSS Fetcher\nHabr · Yandex Cloud\n+ 10 EN feeds"]
+            B2["RSS Fetcher\nHabr · EKS/GKE/AKS\n+ EN feeds"]
             B3["gptr client\nHTTP POST /report/"]
             B4["Email delivery\nSMTP Yandex"]
         end
@@ -204,16 +204,27 @@ All settings are via environment variables in `.env`:
 
 ## RSS Sources
 
-The bot fetches from 18 RSS feeds across two tracks:
+The bot fetches from 18 RSS/Atom feeds across three tracks:
 
-**Russian sources** (included in every daily digest):
+**Russian sources** (included in every daily digest, articles from last 96 h):
 - Habr: kubernetes, devops, monitoring, cloud_computing, sys_admin, linux hubs
-- Yandex Cloud blog
 
-**English sources** (fetched for context, processed by GPT Researcher):
-- kubernetes.io, cncf.io, thenewstack.io, infoq.com
-- AWS Containers blog, Google Cloud / GKE blog
-- devops.com, prometheus.io, grafana.com
+> **Yandex Cloud blog:** the official RSS endpoint returns 404 and was removed. Habr's `cloud_computing` hub covers Yandex Cloud content.
+
+**Managed Kubernetes providers** (dedicated section in every daily digest, articles from last 120 h):
+
+| Provider | Feed used | Why not the official blog? |
+|---|---|---|
+| **AWS EKS** | GitHub: `aws/eks-distro` + `awslabs/amazon-eks-ami` releases | AWS Containers blog times out from Russian IPs |
+| **Google GKE** | `cloud.google.com/feeds/kubernetes-engine-release-notes.xml` | Official release-notes feed — works fine |
+| **Azure AKS** | GitHub: `Azure/AKS` releases | TechCommunity blog returns HTML from Russian IPs |
+| **Alibaba ACK** | — | No working RSS feed from Russian IPs; covered via GPT Researcher weekly query |
+
+> The 120 h look-back window (≈5 days) covers the Thursday–Monday gap: managed K8s providers post far less frequently than Habr, and the window ensures weekend releases are not missed.
+
+**Community & ecosystem** (fetched for context, processed by GPT Researcher):
+- kubernetes.io, cncf.io, thenewstack.io (kubernetes + devops), infoq.com (kubernetes + devops)
+- prometheus.io, grafana.com
 
 ---
 
