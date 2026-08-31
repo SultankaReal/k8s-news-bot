@@ -195,23 +195,52 @@ The bot fetches from 18 RSS feeds across two tracks:
 
 ## Deploy to Yandex Cloud VM
 
-The `infra/` directory contains helpers for Yandex Cloud:
+The `infra/` directory contains helpers for Yandex Cloud.
+
+### 1. Add your SSH public key to cloud-init
+
+Open `infra/cloud-init.yaml` and replace the `YOUR_SSH_PUBLIC_KEY_HERE` placeholder under `ssh_authorized_keys` with your own key:
 
 ```bash
-# Create a VM with cloud-init (installs Docker automatically)
+cat ~/.ssh/id_rsa.pub   # or id_ed25519.pub
+```
+
+> The key **must** live inside `cloud-init.yaml` — do not pass `yc compute instance create --ssh-key`. That flag generates its own cloud-config and writes it to the same `user-data` metadata key, so yc rejects the combination outright:
+> `ERROR: --ssh-key flag conflicts with user-data metadata key.`
+
+### 2. Find your subnet name
+
+```bash
+yc vpc subnet list
+```
+
+### 3. Create the VM
+
+```bash
 yc compute instance create \
   --name k8s-news-bot \
   --zone ru-central1-a \
-  --cores 8 --memory 8 \
+  --cores 8 --memory 8G \
   --create-boot-disk image-folder-id=standard-images,image-family=ubuntu-2204-lts,size=30 \
-  --cloud-config infra/cloud-init.yaml \
-  --ssh-key ~/.ssh/id_rsa.pub
+  --network-interface subnet-name=default-ru-central1-a,nat-ip-version=ipv4 \
+  --metadata-from-file user-data=infra/cloud-init.yaml
+```
 
-# Deploy project files and start containers
+Cloud-init installs Docker Engine + the Compose plugin, `make`, and prepares `/opt/k8s-news-bot`. Wait for it to finish (~2–3 min) before deploying.
+
+Notes on the flags:
+- `--metadata-from-file user-data=...` is how cloud-init is passed. There is no `--cloud-config` flag in `yc`.
+- `--network-interface` is required to reach the VM. `nat-ip-version=ipv4` gives it a public IP; drop it if you only ever connect via `yc compute ssh --tunnel` (which is what `deploy.sh` uses).
+- `--memory 8G` — the flag also accepts a bare `8` (interpreted as GB), but the suffix is unambiguous.
+- Substitute the `subnet-name` value with the one from step 2.
+
+### 4. Deploy project files and start containers
+
+```bash
 ./infra/deploy.sh
 ```
 
-> Edit `infra/cloud-init.yaml` to add your own SSH public key before creating the VM.
+The script copies `news-bot/`, `docker-compose.yml`, `Makefile` and `.env` to the VM over `yc compute scp --tunnel`, then builds and starts the stack.
 
 ---
 
