@@ -53,7 +53,8 @@ flowchart TD
 | Requirement | Details |
 |---|---|
 | **Linux VM** | Ubuntu 22.04+, **8 vCPU / 8 GB RAM minimum** (mistral:7b needs ~5 GB RAM) |
-| **Docker** | Docker Engine 24+ with Compose plugin (`docker compose`) |
+| **Docker Engine 24+** | With the **Compose plugin** — use `docker compose` (v2), not the old standalone `docker-compose` (v1) |
+| **make** | Standard build tool — `sudo apt install make` |
 | **Yandex Mail account** | For SMTP delivery (app password, not regular password) |
 | **Disk** | ~10 GB free (Ollama model storage + Docker images) |
 
@@ -91,14 +92,23 @@ EMAIL_PASSWORD=your_app_password_here
 EMAIL_TO=your@yandex.ru
 ```
 
-### 3. Install Docker (if not already installed)
+### 3. Install Docker + Docker Compose (if not already installed)
 
 ```bash
-# Ubuntu / Debian
+# Ubuntu / Debian — installs Docker Engine + Compose plugin + BuildKit in one go
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 newgrp docker
+
+# Install make
+sudo apt install -y make
+
+# Verify both are working
+docker version          # should show Engine 24+
+docker compose version  # should show Docker Compose v2.x
 ```
+
+> **Important:** this project uses `docker compose` (v2, the plugin). The old standalone `docker-compose` (v1) is not supported and will fail.
 
 ### 4. Start the stack
 
