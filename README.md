@@ -118,19 +118,25 @@ make up
 ```
 
 This starts three services in order:
-1. **ollama** — downloads and serves `mistral:7b` (~4 GB, one-time download)
+1. **ollama** — serves the local LLM (starts empty; see step 5)
 2. **gptr** — GPT Researcher web service (waits for Ollama healthcheck)
 3. **news-bot** — scheduler with cron jobs (waits for gptr healthcheck)
 
-> First startup takes **10–15 minutes** while Ollama downloads the model. Check progress with `make logs`.
+> Pulling the Docker images and building `news-bot` takes ~5–7 minutes on a fresh VM. All three containers then report `healthy` within a minute.
 
-### 5. Pull the Ollama model (first run)
+### 5. Pull the Ollama models (mandatory on first run)
 
-The gptr service will automatically try to pull the model via Ollama on first use. You can also pre-pull it manually:
+> ⚠️ **This step is not optional.** Nothing downloads the models for you: the `ollama` container only starts the server, and its healthcheck (`ollama list`) passes happily with zero models installed. Ollama does **not** auto-pull on first use either — a request for a missing model just returns `{"error":"model 'mistral:7b' not found"}`, and the digest silently ends up without its research section.
 
 ```bash
-docker compose exec ollama ollama pull mistral:7b
-docker compose exec ollama ollama pull nomic-embed-text
+docker compose exec ollama ollama pull mistral:7b        # 4.4 GB, ~3-4 min
+docker compose exec ollama ollama pull nomic-embed-text  # 274 MB
+```
+
+Run the two commands separately, then confirm both models are present:
+
+```bash
+docker compose exec ollama ollama list
 ```
 
 ### 6. Verify the stack is running
@@ -140,7 +146,7 @@ make status
 # or: docker compose ps
 ```
 
-All three services should show `healthy` status.
+`ollama` and `gptr` should show `healthy`; `news-bot` has no healthcheck and just shows `Up`.
 
 ### 7. Test a digest immediately
 
@@ -152,7 +158,25 @@ make test-daily
 make test-weekly
 ```
 
-Check your inbox within 5–10 minutes.
+> **These commands never exit on their own.** `make test-daily` runs `python -m src.main`, which fires the digest immediately and *then* starts the APScheduler loop — so the container keeps running until you press Ctrl+C. The digest is already sent long before that; do not read the hanging terminal as a stuck job.
+
+Watch the actual progress in the container log rather than the attached terminal — over a non-interactive SSH session the attached output can lag badly:
+
+```bash
+docker logs -f --timestamps $(docker ps -q -f name=news-bot-run)
+```
+
+A successful run ends with:
+
+```
+INFO src.research.gptr  — gptr research done: query='Kubernetes DevOps cloud-native news today...' len=5302
+INFO src.delivery.email — Email sent to you@yandex.ru: ☸️ K8s & DevOps дайджест — 31.08.2026
+INFO src.scheduler      — Daily digest delivered
+```
+
+Expect ~8 minutes end-to-end: ~15 s for RSS, ~7 min for the research query on CPU, then the SMTP send.
+
+> **Do not run `make test-daily` while a scheduled digest is in flight.** Ollama and gptr serve requests one at a time, so the second research query waits for the first and then hits its own timeout — you still get an email, but with the RSS section only and no research.
 
 ---
 
@@ -167,7 +191,7 @@ All settings are via environment variables in `.env`:
 | `EMAIL_TO` | `EMAIL_FROM` | Recipient address |
 | `DAILY_DIGEST_CRON` | `0 6 * * *` | Daily digest schedule (UTC cron) |
 | `WEEKLY_REPORT_CRON` | `0 7 * * 1` | Weekly report schedule (UTC cron) |
-| `GPTR_TIMEOUT` | `900` | Max seconds to wait for GPT Researcher (LLM on CPU is slow) |
+| `GPTR_TIMEOUT` | `900` | Max seconds to wait for GPT Researcher — **weekly report only**. The daily digest ignores this and uses a hard-coded 600 s (see `daily_research()` in `news-bot/src/research/gptr.py`) |
 | `FAST_LLM` | `ollama:mistral:7b` | LLM for GPT Researcher fast tasks |
 | `SMART_LLM` | `ollama:mistral:7b` | LLM for GPT Researcher smart tasks |
 | `RETRIEVER` | `duckduckgo` | Web retriever for GPT Researcher |
@@ -308,17 +332,22 @@ k8s-news-bot/
 
 ## Troubleshooting
 
+**Digest arrives with the Russian RSS section but no research section**
+- Almost always a missing model. Check `docker compose exec ollama ollama list` — if it is empty, do step 5. Nothing pulls the models automatically.
+- Otherwise look for `gptr research timed out after` in the news-bot log.
+
 **First startup hangs at "Waiting for ollama healthy"**
-- Ollama is downloading the model (~4 GB). Run `docker compose logs ollama` to see download progress.
+- Ollama's healthcheck is `ollama list`, which passes with zero models, so this is *not* a model download. Check `docker compose logs ollama` for a real startup error.
 
 **Daily digest runs but email is not received**
-- Check `docker compose logs news-bot` for SMTP errors
+- Check `docker compose logs news-bot` for SMTP errors. A successful send logs `Email sent to <address>: <subject>`.
 - Verify `EMAIL_PASSWORD` is an **app password**, not your regular Yandex password
 - Check spam folder
 
 **GPT Researcher times out**
-- Increase `GPTR_TIMEOUT` in `.env` (e.g. `1800` for 30 minutes)
+- For the weekly report, increase `GPTR_TIMEOUT` in `.env` (e.g. `1800` for 30 minutes). For the **daily** digest this variable has no effect — the 600 s cap is hard-coded in `daily_research()`.
 - mistral:7b on CPU takes 5–15 min per research query; this is normal
+- Two research queries never run in parallel: ollama and gptr serialize them, so a manual `make test-daily` overlapping the scheduled run will time out
 
 **DuckDuckGo returns no results**
 - DuckDuckGo rate-limits heavy usage. Wait 10–15 minutes between test runs.
