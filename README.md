@@ -14,26 +14,26 @@ All LLM inference and embeddings run locally via **Ollama** (`llama3.1:8b`). No 
 
 ```mermaid
 flowchart LR
-    Internet["Internet\nRSS · DuckDuckGo"]
+    Internet(["Internet<br/>RSS + DuckDuckGo"])
 
-    subgraph VM["Linux VM — Docker Compose"]
-        RSS["RSS Fetcher\nHabr · EKS/GKE/AKS\n+ EN feeds"]
-        Sched["APScheduler\nDaily 06:00 UTC\nWeekly Mon 07:00 UTC"]
-        GPTR["gptr\nGPT Researcher\n:8000/report/"]
-        Ollama["ollama\nllama3.1:8b + nomic-embed-text\n:11434"]
-        EMail["Email sender\nSMTP :465"]
+    subgraph VM["Linux VM - Docker Compose"]
+        RSS["RSS Fetcher<br/>Habr, EKS, GKE, AKS, EN feeds"]
+        Sched["APScheduler<br/>Daily 06:00 UTC<br/>Weekly Mon 07:00 UTC"]
+        GPTR["GPT Researcher<br/>port 8000"]
+        Ollama["Ollama<br/>llama3.1:8b<br/>nomic-embed-text"]
+        Mail["Email Sender<br/>SMTP port 465"]
     end
 
-    YaMail["Yandex Mail\nInbox"]
+    YaMail(["Yandex Mail"])
 
-    Internet -->|RSS/HTTP| RSS
-    Internet -->|Web search| GPTR
+    Internet -->|"RSS/HTTP"| RSS
+    Internet -->|"Web search"| GPTR
     RSS --> Sched
-    Sched -->|weekly only| GPTR
-    GPTR -->|OpenAI-compatible API| Ollama
-    GPTR -->|Markdown report| Sched
-    Sched --> EMail
-    EMail -->|SSL| YaMail
+    Sched -->|"weekly report only"| GPTR
+    GPTR <-->|"OpenAI-compatible API"| Ollama
+    GPTR -->|"Markdown report"| Sched
+    Sched --> Mail
+    Mail -->|"SSL"| YaMail
 ```
 
 ---
