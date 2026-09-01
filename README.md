@@ -14,27 +14,27 @@ All LLM inference and embeddings run locally via **Ollama** (`llama3.1:8b`). No 
 
 ```mermaid
 flowchart LR
-    Internet([Internet])
+    Internet(["Internet"])
 
-    subgraph VM[Linux VM - Docker Compose]
-        RSS[RSS Fetcher]
-        Sched[APScheduler]
-        GPTR[GPT Researcher]
-        Ollama[Ollama llama3.1:8b]
-        Mail[Email Sender]
+    subgraph VM["Linux VM - Docker Compose"]
+        RSS["RSS Fetcher"]
+        Sched["APScheduler"]
+        GPTR["GPT Researcher"]
+        Ollama["Ollama - llama3.1-8b"]
+        Mail["Email Sender"]
     end
 
-    YaMail([Yandex Mail])
+    YaMail(["Yandex Mail"])
 
-    Internet -->|RSS feeds| RSS
-    Internet -->|web search| GPTR
-    RSS -->|articles| Sched
-    Sched -->|weekly only| GPTR
-    GPTR -->|LLM request| Ollama
-    Ollama -->|response| GPTR
-    GPTR -->|report| Sched
-    Sched -->|digest| Mail
-    Mail -->|SMTP SSL| YaMail
+    Internet -->|"RSS feeds"| RSS
+    Internet -->|"web search"| GPTR
+    RSS -->|"articles"| Sched
+    Sched -->|"weekly only"| GPTR
+    GPTR -->|"LLM request"| Ollama
+    Ollama -->|"response"| GPTR
+    GPTR -->|"report"| Sched
+    Sched -->|"digest"| Mail
+    Mail -->|"SMTP SSL"| YaMail
 ```
 
 ---
