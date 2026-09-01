@@ -6,44 +6,34 @@ Automated Kubernetes & DevOps digest bot. Runs a daily email digest and a weekly
 - **Daily digest** — fetches RSS from Habr (6 hubs), Kubernetes.io, CNCF, InfoQ, Prometheus, Grafana + GitHub release feeds for managed K8s providers (EKS, GKE, AKS). All links come from real RSS feeds — no LLM synthesis, no hallucination. Delivers to your inbox every morning in under 30 seconds.
 - **Weekly report** — runs 5 focused research queries (Kubernetes releases, CNCF, managed K8s, observability, Russian-language sources) and sends a comprehensive analytical report every Monday.
 
-All LLM inference and embeddings run locally via **Ollama** (`mistral:7b`). No OpenAI key needed.
+All LLM inference and embeddings run locally via **Ollama** (`llama3.1:8b`). No OpenAI key needed.
 
 ---
 
 ## Architecture
 
 ```mermaid
-flowchart TD
-    subgraph VM["Linux VM (Docker Compose)"]
-        direction TB
+flowchart LR
+    Internet["Internet\nRSS · DuckDuckGo"]
 
-        subgraph Ollama["ollama — Local LLM"]
-            O1["mistral:7b\nLLM inference"]
-            O2["nomic-embed-text\nEmbeddings"]
-        end
-
-        subgraph GPTR["gptr — GPT Researcher"]
-            G1["Research engine\n:8000/report/"]
-            G2["DuckDuckGo search\n(web retriever)"]
-        end
-
-        subgraph Bot["news-bot — Scheduler"]
-            B1["APScheduler\nCron jobs"]
-            B2["RSS Fetcher\nHabr · EKS/GKE/AKS\n+ EN feeds"]
-            B3["gptr client\nHTTP POST /report/"]
-            B4["Email delivery\nSMTP Yandex"]
-        end
-
-        Ollama -->|"OpenAI-compatible API\nhttp://ollama:11434/v1"| GPTR
-        GPTR -->|"Markdown report"| Bot
-        B2 -->|"Articles"| B1
-        B3 -->|"Research query"| G1
-        B1 -->|"Daily 06:00 UTC\nWeekly Mon 07:00 UTC"| B4
+    subgraph VM["Linux VM — Docker Compose"]
+        RSS["RSS Fetcher\nHabr · EKS/GKE/AKS\n+ EN feeds"]
+        Sched["APScheduler\nDaily 06:00 UTC\nWeekly Mon 07:00 UTC"]
+        GPTR["gptr\nGPT Researcher\n:8000/report/"]
+        Ollama["ollama\nllama3.1:8b + nomic-embed-text\n:11434"]
+        EMail["Email sender\nSMTP :465"]
     end
 
-    Internet["🌐 Internet\nRSS feeds · DuckDuckGo"] -->|"RSS/HTTP"| B2
-    Internet -->|"Web search"| G2
-    B4 -->|"SMTP :465 SSL"| Email["📧 Yandex Mail\nInbox"]
+    YaMail["Yandex Mail\nInbox"]
+
+    Internet -->|RSS/HTTP| RSS
+    Internet -->|Web search| GPTR
+    RSS --> Sched
+    Sched -->|weekly only| GPTR
+    GPTR -->|OpenAI-compatible API| Ollama
+    GPTR -->|Markdown report| Sched
+    Sched --> EMail
+    EMail -->|SSL| YaMail
 ```
 
 ---
@@ -52,13 +42,13 @@ flowchart TD
 
 | Requirement | Details |
 |---|---|
-| **Linux VM** | Ubuntu 22.04+, **8 vCPU / 8 GB RAM minimum** (mistral:7b needs ~5 GB RAM) |
+| **Linux VM** | Ubuntu 22.04+, **8 vCPU / 8 GB RAM minimum** (llama3.1:8b needs ~5 GB RAM) |
 | **Docker Engine 24+** | With the **Compose plugin** — use `docker compose` (v2), not the old standalone `docker-compose` (v1) |
 | **make** | Standard build tool — `sudo apt install make` |
 | **Yandex Mail account** | For SMTP delivery (app password, not regular password) |
 | **Disk** | ~10 GB free (Ollama model storage + Docker images) |
 
-> **Note:** mistral:7b runs on CPU, but first inference after container start takes 2–4 minutes. 8 cores keep the daily digest latency tolerable (typically 5–10 min end-to-end); it will still run on 4 cores, just noticeably slower.
+> **Note:** llama3.1:8b runs on CPU, but first inference after container start takes 2–4 minutes. 8 cores keep the weekly report latency tolerable (typically 5–10 min); it will still run on 4 cores, just noticeably slower. The daily digest does not use the LLM at all.
 
 ---
 
@@ -126,10 +116,10 @@ This starts three services in order:
 
 ### 5. Pull the Ollama models (mandatory on first run)
 
-> ⚠️ **This step is not optional.** Nothing downloads the models for you: the `ollama` container only starts the server, and its healthcheck (`ollama list`) passes happily with zero models installed. Ollama does **not** auto-pull on first use either — a request for a missing model just returns `{"error":"model 'mistral:7b' not found"}`, and the digest silently ends up without its research section.
+> ⚠️ **This step is not optional.** Nothing downloads the models for you: the `ollama` container only starts the server, and its healthcheck (`ollama list`) passes happily with zero models installed. Ollama does **not** auto-pull on first use either — a request for a missing model just returns `{"error":"model 'llama3.1:8b' not found"}`, and the weekly report silently ends up without its research section.
 
 ```bash
-docker compose exec ollama ollama pull mistral:7b        # 4.4 GB, ~3-4 min
+docker compose exec ollama ollama pull llama3.1:8b       # 4.7 GB, ~4-5 min
 docker compose exec ollama ollama pull nomic-embed-text  # 274 MB
 ```
 
@@ -192,8 +182,8 @@ All settings are via environment variables in `.env`:
 | `DAILY_DIGEST_CRON` | `0 6 * * *` | Daily digest schedule (UTC cron) |
 | `WEEKLY_REPORT_CRON` | `0 7 * * 1` | Weekly report schedule (UTC cron) |
 | `GPTR_TIMEOUT` | `900` | Max seconds to wait for GPT Researcher — **weekly report only**. The daily digest ignores this and uses a hard-coded 600 s (see `daily_research()` in `news-bot/src/research/gptr.py`) |
-| `FAST_LLM` | `ollama:mistral:7b` | LLM for GPT Researcher fast tasks |
-| `SMART_LLM` | `ollama:mistral:7b` | LLM for GPT Researcher smart tasks |
+| `FAST_LLM` | `ollama:llama3.1:8b` | LLM for GPT Researcher fast tasks |
+| `SMART_LLM` | `ollama:llama3.1:8b` | LLM for GPT Researcher smart tasks |
 | `RETRIEVER` | `duckduckgo` | Web retriever for GPT Researcher |
 | `GPTR_OUTPUTS_MAX_AGE_DAYS` | `7` | Days to keep GPT Researcher output files |
 | `LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`) |
@@ -357,7 +347,7 @@ k8s-news-bot/
 
 **GPT Researcher times out**
 - For the weekly report, increase `GPTR_TIMEOUT` in `.env` (e.g. `1800` for 30 minutes). For the **daily** digest this variable has no effect — the 600 s cap is hard-coded in `daily_research()`.
-- mistral:7b on CPU takes 5–15 min per research query; this is normal
+- llama3.1:8b on CPU takes 5–15 min per research query; this is normal
 - Two research queries never run in parallel: ollama and gptr serialize them, so a manual `make test-daily` overlapping the scheduled run will time out
 
 **DuckDuckGo returns no results**
