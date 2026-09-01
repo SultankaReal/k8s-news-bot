@@ -12,29 +12,32 @@ All LLM inference and embeddings run locally via **Ollama** (`llama3.1:8b`). No 
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    Internet(["Internet"])
+Everything runs on a single Linux VM inside Docker Compose. Three containers form the stack:
 
-    subgraph VM["Linux VM - Docker Compose"]
-        RSS["RSS Fetcher"]
-        Sched["APScheduler"]
-        GPTR["GPT Researcher"]
-        Ollama["Ollama - llama3.1-8b"]
-        Mail["Email Sender"]
-    end
+- **ollama** — local LLM server. Runs `llama3.1:8b` for text generation and `nomic-embed-text` for embeddings. Exposes an OpenAI-compatible API on port 11434. No external AI API keys needed.
+- **gptr** (GPT Researcher) — research engine on port 8000. Given a query, it searches the web via DuckDuckGo, retrieves pages, and produces a Markdown report using Ollama for synthesis. Used only for the weekly report.
+- **news-bot** — the scheduler (APScheduler). Runs two jobs: a daily digest and a weekly report. Fetches RSS feeds directly, calls gptr for deep research, and sends results via Yandex SMTP.
 
-    YaMail(["Yandex Mail"])
+**Daily digest flow** (runs at 06:00 UTC, completes in under 30 seconds):
 
-    Internet -->|"RSS feeds"| RSS
-    Internet -->|"web search"| GPTR
-    RSS -->|"articles"| Sched
-    Sched -->|"weekly only"| GPTR
-    GPTR -->|"LLM request"| Ollama
-    Ollama -->|"response"| GPTR
-    GPTR -->|"report"| Sched
-    Sched -->|"digest"| Mail
-    Mail -->|"SMTP SSL"| YaMail
+```
+Internet (RSS/Atom feeds)
+  --> news-bot RSS Fetcher  [Habr hubs, EKS/GKE/AKS GitHub releases, EN feeds]
+  --> APScheduler assembles email
+  --> Yandex Mail (SMTP :465 SSL)
+```
+
+No LLM involved — all links come directly from RSS feeds, no hallucination possible.
+
+**Weekly report flow** (runs Monday at 07:00 UTC, takes 5–15 minutes on CPU):
+
+```
+APScheduler triggers 5 research queries
+  --> GPT Researcher (gptr)
+        --> DuckDuckGo web search
+        --> Ollama llama3.1:8b (synthesis)
+  --> Markdown report
+  --> Yandex Mail (SMTP :465 SSL)
 ```
 
 ---
